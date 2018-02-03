@@ -11,6 +11,7 @@ import (
 	"github.com/usedbytes/bot_matrix/datalink/spiconn"
 )
 
+const AckEndpoint = 0x1
 const ErrorEndpoint = 0xff
 type ErrorPkt struct {
 	ID uint8
@@ -103,6 +104,23 @@ func (r *ReadRespPkt) UnmarshalBinary(data []byte) error {
 	return nil
 }
 
+const EraseEndpoint = 0x3
+type ErasePkt struct {
+	Address uint32
+}
+
+func (e *ErasePkt) Packet() datalink.Packet {
+	pkt := datalink.Packet{
+		Endpoint: EraseEndpoint,
+	}
+
+	buf := new(bytes.Buffer)
+	binary.Write(buf, binary.LittleEndian, e.Address)
+	pkt.Data = buf.Bytes()
+
+	return pkt
+}
+
 func sync(c datalink.Transactor) error {
 	c.Transact([]datalink.Packet{
 		datalink.Packet{2, []byte{ 0, 0, 0, 0, 1, 2, 3, 4 }},
@@ -189,6 +207,62 @@ func readData(c datalink.Transactor, address, length uint32) (*ReadRespPkt, erro
 	}
 
 	return nil, fmt.Errorf("Read timeout.")
+}
+
+func waitForAck(c datalink.Transactor, timeout time.Duration) error {
+	loops := timeout / (5 * time.Millisecond)
+
+	for i := 0; i < int(loops); i++ {
+		time.Sleep(5 * time.Millisecond)
+		ret, err := c.Transact([]datalink.Packet{
+			datalink.Packet{0, []byte{}},
+		})
+		if (err != nil) {
+			continue
+		}
+
+		for _, pkt := range ret {
+			if pkt.Endpoint == AckEndpoint {
+				return nil
+			}
+		}
+	}
+
+	return fmt.Errorf("Timeout waiting for Ack.")
+}
+
+func erasePage(c datalink.Transactor, address uint32) error {
+	req := ErasePkt{
+		Address: address,
+	}
+
+	if (address & uint32(1024 - 1)) != 0 {
+		return fmt.Errorf("Erase address must be 1 kB page-aligned.");
+	}
+
+	_, err := c.Transact([]datalink.Packet{
+		req.Packet(),
+	})
+	if err != nil {
+		return err
+	}
+
+	err = waitForAck(c, 50 * time.Millisecond)
+	if err != nil {
+		return err
+	}
+
+	dat, err := readData(c, address, 512)
+	if err != nil {
+		return err
+	}
+	for _, x := range dat.Data {
+		if x != 0xff {
+			return fmt.Errorf("Erase unsuccessful.")
+		}
+	}
+
+	return nil
 }
 
 func main() {
