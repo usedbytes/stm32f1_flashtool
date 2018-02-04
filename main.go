@@ -5,7 +5,11 @@ import (
 	_ "encoding/hex"
 	"encoding/binary"
 	"fmt"
+	"flag"
+	"io"
+	"os"
 	"strings"
+	"strconv"
 	"time"
 
 	"github.com/usedbytes/bot_matrix/datalink"
@@ -217,6 +221,54 @@ func (r *QueryRespPkt) UnmarshalBinary(data []byte) error {
 
 type FlashCtx struct {
 	c datalink.Transactor
+
+	maxTransfer uint32
+	read bool
+	readCfg readCfg
+	erase bool
+	eraseCfg eraseCfg
+	autoErase bool
+	write bool
+	writeCfg writeCfg
+	verify bool
+	retries uint
+	reset bool
+	jump bool
+	jumpCfg jumpCfg
+}
+type operation func(ctx *FlashCtx) error
+
+func (ctx *FlashCtx) retry(op operation) error {
+	for i := uint(0); i < ctx.retries; i++ {
+		err := op(ctx)
+		if err == nil {
+			return nil
+		}
+
+		fmt.Fprintln(os.Stderr, err)
+	}
+
+	return fmt.Errorf("Too many failures.")
+}
+
+func doRead(ctx *FlashCtx) error {
+	return nil
+}
+
+func doErase(ctx *FlashCtx) error {
+	return nil
+}
+
+func doWrite(ctx *FlashCtx) error {
+	return nil
+}
+
+func doReset(ctx *FlashCtx) error {
+	return nil
+}
+
+func doJump(ctx *FlashCtx) error {
+	return nil
 }
 
 func sync(ctx *FlashCtx) error {
@@ -506,57 +558,296 @@ func doQuery(ctx *FlashCtx, parameter uint32) (uint32, error) {
 	return 0, fmt.Errorf("Read timeout.")
 }
 
-func main() {
-	c, err := spiconn.NewSPIConn("/dev/spidev0.0")
-	if err != nil {
-		fmt.Println(err)
-		return
+type CmdLine struct {
+	dev string
+	baud uint
+	readStr string
+	eraseStr string
+	autoErase bool
+	writeStr string
+	verify bool
+	retries uint
+	reset bool
+	jumpStr string
+}
+
+var cmdLine CmdLine
+
+type readCfg struct {
+	address uint32
+	length uint32
+	file io.Writer
+}
+
+func (c *readCfg) UnmarshalText(text []byte) error {
+	str := string(text)
+
+	parts := strings.Split(str, ":")
+	if len(parts) != 3 {
+		return fmt.Errorf("Read command must be of the form: address:length:file")
 	}
-	ctx := new(FlashCtx)
+
+	addr, err := strconv.ParseUint(parts[0], 0, 32)
+	if err != nil {
+		return err
+	}
+	c.address = uint32(addr)
+
+	length, err := strconv.ParseUint(parts[1], 0, 32)
+	if err != nil {
+		return err
+	}
+	c.length = uint32(length)
+
+	if parts[2] == "-" {
+		c.file = os.Stdout
+	} else {
+		file, err := os.Create(parts[2])
+		if err != nil {
+			return err
+		}
+		c.file = file
+	}
+
+	return nil
+}
+
+type eraseCfg struct {
+	address uint32
+	length uint32
+}
+
+func (c *eraseCfg) UnmarshalText(text []byte) error {
+	str := string(text)
+
+	parts := strings.Split(str, ":")
+	if len(parts) != 2 {
+		return fmt.Errorf("Erase command must be of the form: address:length")
+	}
+
+	addr, err := strconv.ParseUint(parts[0], 0, 32)
+	if err != nil {
+		return err
+	}
+	c.address = uint32(addr)
+
+	length, err := strconv.ParseUint(parts[1], 0, 32)
+	if err != nil {
+		return err
+	}
+	c.length = uint32(length)
+
+	return nil
+}
+
+type writeCfg struct {
+	address uint32
+	length uint32
+	file io.Reader
+}
+
+func (c *writeCfg) UnmarshalText(text []byte) error {
+	str := string(text)
+
+	parts := strings.Split(str, ":")
+	if len(parts) != 3 {
+		return fmt.Errorf("Write command must be of the form: address:length:file")
+	}
+
+	addr, err := strconv.ParseUint(parts[0], 0, 32)
+	if err != nil {
+		return err
+	}
+	c.address = uint32(addr)
+
+	length, err := strconv.ParseUint(parts[1], 0, 32)
+	if err != nil {
+		return err
+	}
+	c.length = uint32(length)
+
+	if parts[2] == "-" {
+		c.file = os.Stdin
+	} else {
+		file, err := os.Open(parts[2])
+		if err != nil {
+			return err
+		}
+		c.file = file
+	}
+
+	return nil
+}
+
+type jumpCfg struct {
+	address uint32
+}
+
+func (c *jumpCfg) UnmarshalText(text []byte) error {
+	str := string(text)
+
+	addr, err := strconv.ParseUint(str, 0, 32)
+	if err != nil {
+		return err
+	}
+	c.address = uint32(addr)
+
+	return nil
+}
+
+func init() {
+	// -d device (/dev/spidev0.0)
+	//     The SPI device to use
+	// -b clk (default 1 MHz)
+	//     SPI clock rate
+	// -r address:length:file
+	//     Read from address into file
+	// -e [address:length]
+	//     Erase length bytes from address
+	// -E
+	//     Erase before write (valid only in conjunction with 'w')
+	// -w address:file
+	// -v verify
+	//     Read back written data to verify
+	// -n retries (default 5)
+	//     Allow operations to be retried in the case of an error.
+	// -r
+	//     Reset when done
+	// -g address
+	//     Jump to address
+
+	flag.StringVar(&cmdLine.dev, "d", "/dev/spidev0.0", "The SPI device to use.")
+	flag.UintVar(&cmdLine.baud, "b", 1000000, "The SPI clock speed.")
+	flag.StringVar(&cmdLine.readStr, "r", "", "address:length:file - Read length bytes from address into file.")
+	flag.StringVar(&cmdLine.eraseStr, "e", "", "[address:length] - Erase length bytes from address.")
+	flag.BoolVar(&cmdLine.autoErase, "E", false, "Erase before write.")
+	flag.StringVar(&cmdLine.writeStr, "w", "", "address:length:file - Write length bytes from file into address.")
+	flag.BoolVar(&cmdLine.verify, "v", false, "Verify after write.")
+	flag.UintVar(&cmdLine.retries, "n", 5, "Number of times to allow operations to be retried in the case of an error.")
+	flag.BoolVar(&cmdLine.reset, "R", false, "Reset when done.")
+	flag.StringVar(&cmdLine.jumpStr, "g", "", "address - Jump to address.")
+}
+
+func parseCmdline(ctx *FlashCtx) error {
+	flag.Parse()
+
+	c, err := spiconn.NewSPIConn(cmdLine.dev)
+	if err != nil {
+		return err
+	}
 	ctx.c = c
 
-	err = sync(ctx)
+	if cmdLine.readStr != "" {
+		err = (ctx.readCfg).UnmarshalText([]byte(cmdLine.readStr))
+		if err != nil {
+			return err
+		}
+		ctx.read = true
+	}
+
+	if cmdLine.eraseStr != "" {
+		err = (ctx.eraseCfg).UnmarshalText([]byte(cmdLine.eraseStr))
+		if err != nil {
+			return err
+		}
+		ctx.erase = true
+	}
+
+	ctx.autoErase = cmdLine.autoErase
+
+	if cmdLine.writeStr != "" {
+		err = (ctx.writeCfg).UnmarshalText([]byte(cmdLine.writeStr))
+		if err != nil {
+			return err
+		}
+		ctx.write = true
+	}
+
+	ctx.verify = cmdLine.verify
+
+	ctx.retries = cmdLine.retries
+
+	ctx.reset = cmdLine.reset
+
+	if cmdLine.jumpStr != "" {
+		err = (ctx.jumpCfg).UnmarshalText([]byte(cmdLine.jumpStr))
+		if err != nil {
+			return err
+		}
+		ctx.jump = true
+	}
+
+	return nil
+}
+
+func main() {
+	ctx := new(FlashCtx)
+
+	err := parseCmdline(ctx)
 	if err != nil {
-		fmt.Println("sync err:", err)
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
 	}
 
 	maxTransfer, err := doQuery(ctx, QueryParamMaxTransfer)
 	if err != nil {
-		fmt.Println("query err:", err)
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
 	}
-	fmt.Println("Max transfer size: ", maxTransfer)
+	fmt.Fprintln(os.Stderr, "Max transfer size: ", maxTransfer)
+	ctx.maxTransfer = maxTransfer
 
+	err = sync(ctx)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "Init failed:", err)
+		os.Exit(1)
+	}
 
-	/*
-	err = erasePage(ctx.c, 0x0800C000);
-	fmt.Println(err)
+	// Do each step in order:
+	// 1. Read
+	if ctx.read {
+		err = ctx.retry(doRead)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+	}
 
-	err = writeData(ctx.c, 0x0800C000, bytes.Repeat([]byte{1, 2, 3, 4}, 128), true);
-	fmt.Println(err)
-	*/
+	// 2. Erase
+	if ctx.erase {
+		err = ctx.retry(doErase)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+	}
 
+	// 3. Write
+	if ctx.write {
+		err = ctx.retry(doWrite)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+	}
 
-	time.Sleep(1 * time.Second)
-	jumpTo(ctx, 0x0800C000)
+	// 4. Reset
+	if ctx.reset {
+		err = ctx.retry(doReset)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+	}
+
+	// 5. Jump
+	if ctx.jump {
+		err = ctx.retry(doJump)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+	}
 
 	return
-
-	t := time.NewTicker(500 * time.Millisecond)
-	for _ = range t.C {
-
-		//start := time.Now()
-		/*
-		resp, err := readData(ctx.c, 0x0800C000, 512)
-		if err != nil {
-			fmt.Println(err)
-			err = sync(ctx.c)
-			if err != nil {
-				fmt.Println("sync err:", err)
-			}
-		} else {
-			fmt.Printf("Read %d bytes.\n", resp.Len)
-			fmt.Println(time.Since(start))
-		}
-		*/
-	}
 }
