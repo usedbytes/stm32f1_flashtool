@@ -5,6 +5,7 @@ import (
 	_ "encoding/hex"
 	"encoding/binary"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/usedbytes/bot_matrix/datalink"
@@ -134,6 +135,10 @@ func (e *ErasePkt) Packet() datalink.Packet {
 	return pkt
 }
 
+func IsCRCError(e error) bool {
+	return strings.Contains(e.Error(), "CRC")
+}
+
 func sync(c datalink.Transactor) error {
 	c.Transact([]datalink.Packet{
 		datalink.Packet{2, []byte{ 0, 0, 0, 0, 1, 2, 3, 4 }},
@@ -231,7 +236,10 @@ func waitForAck(c datalink.Transactor, timeout time.Duration) error {
 			datalink.Packet{0, []byte{}},
 		})
 		if (err != nil) {
-			continue
+			if IsCRCError(err) {
+				continue
+			}
+			return err
 		}
 
 		for _, pkt := range ret {
