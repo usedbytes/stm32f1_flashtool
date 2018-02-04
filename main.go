@@ -181,6 +181,40 @@ func (g *GoPkt) Packet() datalink.Packet {
 	return pkt
 }
 
+const QueryEndpoint = 0x8
+const QueryParamMaxTransfer = 0x1
+
+type QueryPkt struct {
+	Parameter uint32
+}
+
+func (q *QueryPkt) Packet() datalink.Packet {
+	pkt := datalink.Packet{
+		Endpoint: QueryEndpoint,
+	}
+
+	buf := new(bytes.Buffer)
+	binary.Write(buf, binary.LittleEndian, q.Parameter)
+
+	pkt.Data = buf.Bytes()
+
+	return pkt
+}
+
+const QueryRespEndpoint = 0x9
+type QueryRespPkt struct {
+	Parameter uint32
+	Value uint32
+}
+
+func (r *QueryRespPkt) UnmarshalBinary(data []byte) error {
+	buf := bytes.NewBuffer(data)
+	binary.Read(buf, binary.LittleEndian, &r.Parameter)
+	binary.Read(buf, binary.LittleEndian, &r.Value)
+
+	return nil
+}
+
 func sync(c datalink.Transactor) error {
 	c.Transact([]datalink.Packet{
 		datalink.Packet{2, []byte{ 0, 0, 0, 0, 1, 2, 3, 4 }},
@@ -420,6 +454,54 @@ func writeData(c datalink.Transactor, address uint32, data []byte, verify bool) 
 
 	return nil
 }
+
+func doQuery(c datalink.Transactor, parameter uint32) (uint32, error) {
+	req := QueryPkt{
+		Parameter: parameter,
+	}
+
+	_, err := c.Transact([]datalink.Packet{
+		req.Packet(),
+	})
+	if err != nil {
+		return 0, err
+	}
+
+	ntries := 8
+	for i := 0; i < ntries; i++ {
+		ret, err := c.Transact([]datalink.Packet{
+			datalink.Packet{0, []byte{}},
+		})
+		if err != nil {
+			return 0, err
+		}
+
+		for _, pkt := range ret {
+			switch pkt.Endpoint {
+			case ErrorEndpoint:
+				e := new(ErrorPkt)
+				err = e.UnmarshalBinary(pkt.Data)
+				if err != nil {
+					return 0, err
+				}
+				return 0, e
+			case QueryRespEndpoint:
+				resp := new(QueryRespPkt)
+				err = resp.UnmarshalBinary(pkt.Data)
+				if err != nil {
+					return 0, err
+				}
+				if resp.Parameter != parameter {
+					return 0, fmt.Errorf("Received wrong query response");
+				}
+				return resp.Value, nil
+			}
+		}
+	}
+
+	return 0, fmt.Errorf("Read timeout.")
+}
+
 
 func main() {
 
