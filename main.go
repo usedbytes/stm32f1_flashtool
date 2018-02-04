@@ -386,7 +386,7 @@ func doReset(ctx *FlashCtx) error {
 }
 
 func doJump(ctx *FlashCtx) error {
-	return nil
+	return jumpTo(ctx, ctx.jumpCfg.address)
 }
 
 func sync(ctx *FlashCtx) error {
