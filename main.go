@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"time"
 
+	"gopkg.in/cheggaaa/pb.v1"
 	"github.com/usedbytes/bot_matrix/datalink"
 	"github.com/usedbytes/bot_matrix/datalink/spiconn"
 )
@@ -259,11 +260,16 @@ func min(a, b uint32) uint32 {
 }
 
 func doRead(ctx *FlashCtx) error {
-
 	length := ctx.readCfg.length
 	lastAddress := ctx.readCfg.address + length
 
+	fmt.Fprintf(os.Stderr, "Read %d bytes from 0x%08x\n", length, ctx.readCfg.address)
+
 	buf := new(bytes.Buffer)
+
+	bar := pb.New(int(lastAddress - ctx.readCfg.address))
+	bar.ManualUpdate = true
+	bar.Start()
 
 	for address := ctx.readCfg.address; address < lastAddress; address += ctx.maxTransfer {
 		chunk := min(lastAddress - address, ctx.maxTransfer)
@@ -272,7 +278,12 @@ func doRead(ctx *FlashCtx) error {
 			return err
 		}
 		buf.Write(b.Data)
+
+		bar.Add(int(chunk))
+		bar.Update()
 	}
+
+	bar.Finish()
 
 	ctx.readCfg.file.Write(buf.Bytes())
 	if f, ok := ctx.readCfg.file.(*os.File); ok {
