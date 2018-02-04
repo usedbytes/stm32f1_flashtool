@@ -168,8 +168,8 @@ func sync(c datalink.Transactor) error {
 		datalink.Packet{2, []byte{ 0, 0, 0, 0, 1, 2, 3, 4 }},
 	})
 
-	for i := 0; i < 5; i++ {
-		ret, err := c.Transact([]datalink.Packet{
+	for i := 0; i < 64; i++ {
+		ret, _ := c.Transact([]datalink.Packet{
 			datalink.Packet{0, []byte{}},
 			datalink.Packet{0, []byte{}},
 			datalink.Packet{0, []byte{}},
@@ -179,6 +179,7 @@ func sync(c datalink.Transactor) error {
 
 		for _, pkt := range ret {
 			switch pkt.Endpoint {
+			/*
 			case ErrorEndpoint:
 				e := new(ErrorPkt)
 				err = e.UnmarshalBinary(pkt.Data)
@@ -186,6 +187,7 @@ func sync(c datalink.Transactor) error {
 					return err
 				}
 				return e
+			*/
 			case 2:
 				if !bytes.Equal(pkt.Data[4:8], []byte{1, 2, 3, 4}) {
 					return fmt.Errorf("Bad sync cookie.")
@@ -259,15 +261,20 @@ func waitForAck(c datalink.Transactor, timeout time.Duration) error {
 		ret, err := c.Transact([]datalink.Packet{
 			datalink.Packet{0, []byte{}},
 		})
-		if (err != nil) {
-			if IsCRCError(err) {
-				continue
-			}
+		if (err != nil) && !IsCRCError(err) {
 			return err
 		}
 
 		for _, pkt := range ret {
-			if pkt.Endpoint == AckEndpoint {
+			switch pkt.Endpoint {
+			case ErrorEndpoint:
+				e := new(ErrorPkt)
+				err = e.UnmarshalBinary(pkt.Data)
+				if err != nil {
+					return err
+				}
+				return e
+			case AckEndpoint:
 				return nil
 			}
 		}
@@ -285,11 +292,22 @@ func erasePage(c datalink.Transactor, address uint32) error {
 		return fmt.Errorf("Erase address must be 1 kB page-aligned.");
 	}
 
-	_, err := c.Transact([]datalink.Packet{
+	ret, err := c.Transact([]datalink.Packet{
 		req.Packet(),
 	})
 	if err != nil {
 		return err
+	}
+	for _, pkt := range ret {
+		switch pkt.Endpoint {
+		case ErrorEndpoint:
+			e := new(ErrorPkt)
+			err = e.UnmarshalBinary(pkt.Data)
+			if err != nil {
+				return err
+			}
+			return e
+		}
 	}
 
 	err = waitForAck(c, 50 * time.Millisecond)
@@ -323,11 +341,22 @@ func writeData(c datalink.Transactor, address uint32, data []byte, verify bool) 
 	}
 	req.CRC = crc
 
-	_, err = c.Transact([]datalink.Packet{
+	ret, err := c.Transact([]datalink.Packet{
 		req.Packet(),
 	})
 	if err != nil {
 		return err
+	}
+	for _, pkt := range ret {
+		switch pkt.Endpoint {
+		case ErrorEndpoint:
+			e := new(ErrorPkt)
+			err = e.UnmarshalBinary(pkt.Data)
+			if err != nil {
+				return err
+			}
+			return e
+		}
 	}
 
 	err = waitForAck(c, 50 * time.Millisecond)
