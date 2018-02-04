@@ -386,6 +386,9 @@ func doReset(ctx *FlashCtx) error {
 }
 
 func doJump(ctx *FlashCtx) error {
+
+	fmt.Fprintf(os.Stderr, "Jump to 0x%08x...\n", ctx.jumpCfg.address)
+
 	return jumpTo(ctx, ctx.jumpCfg.address)
 }
 
