@@ -189,6 +189,7 @@ func (g *GoPkt) Packet() datalink.Packet {
 
 const QueryEndpoint = 0x8
 const QueryParamMaxTransfer = 0x1
+const QueryDefaultUserAddr = 0x2
 
 type QueryPkt struct {
 	Parameter uint32
@@ -943,6 +944,13 @@ func main() {
 	}
 	fmt.Fprintln(os.Stderr, "Max transfer size: ", maxTransfer)
 	ctx.maxTransfer = maxTransfer
+
+	defaultAddr, err := doQuery(ctx, QueryDefaultUserAddr)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "Get defaultUserAddr failed: ", err)
+		os.Exit(1)
+	}
+	fmt.Fprintf(os.Stderr, "Default user address: 0x%08x\n", defaultAddr)
 
 	err = sync(ctx)
 	if err != nil {
