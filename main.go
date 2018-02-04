@@ -215,13 +215,17 @@ func (r *QueryRespPkt) UnmarshalBinary(data []byte) error {
 	return nil
 }
 
-func sync(c datalink.Transactor) error {
-	c.Transact([]datalink.Packet{
+type FlashCtx struct {
+	c datalink.Transactor
+}
+
+func sync(ctx *FlashCtx) error {
+	ctx.c.Transact([]datalink.Packet{
 		datalink.Packet{2, []byte{ 0, 0, 0, 0, 1, 2, 3, 4 }},
 	})
 
 	for i := 0; i < 64; i++ {
-		ret, _ := c.Transact([]datalink.Packet{
+		ret, _ := ctx.c.Transact([]datalink.Packet{
 			datalink.Packet{0, []byte{}},
 			datalink.Packet{0, []byte{}},
 			datalink.Packet{0, []byte{}},
@@ -257,13 +261,13 @@ func sync(c datalink.Transactor) error {
 	return fmt.Errorf("Sync took too long.")
 }
 
-func readData(c datalink.Transactor, address, length uint32) (*ReadRespPkt, error) {
+func readData(ctx *FlashCtx, address, length uint32) (*ReadRespPkt, error) {
 	req := ReadReqPkt{
 		Address: address,
 		Len: length,
 	}
 
-	_, err := c.Transact([]datalink.Packet{
+	_, err := ctx.c.Transact([]datalink.Packet{
 		req.Packet(),
 	})
 	if err != nil {
@@ -275,7 +279,7 @@ func readData(c datalink.Transactor, address, length uint32) (*ReadRespPkt, erro
 		ntries = 8
 	}
 	for i := uint32(0); i < ntries; i++ {
-		ret, err := c.Transact([]datalink.Packet{
+		ret, err := ctx.c.Transact([]datalink.Packet{
 			datalink.Packet{0, []byte{}},
 		})
 		if err != nil {
@@ -305,12 +309,12 @@ func readData(c datalink.Transactor, address, length uint32) (*ReadRespPkt, erro
 	return nil, fmt.Errorf("Read timeout.")
 }
 
-func waitForAck(c datalink.Transactor, timeout time.Duration) error {
+func waitForAck(ctx *FlashCtx, timeout time.Duration) error {
 	loops := timeout / (5 * time.Millisecond)
 
 	for i := 0; i < int(loops); i++ {
 		time.Sleep(5 * time.Millisecond)
-		ret, err := c.Transact([]datalink.Packet{
+		ret, err := ctx.c.Transact([]datalink.Packet{
 			datalink.Packet{0, []byte{}},
 		})
 		if (err != nil) && !IsCRCError(err) {
@@ -335,7 +339,7 @@ func waitForAck(c datalink.Transactor, timeout time.Duration) error {
 	return fmt.Errorf("Timeout waiting for Ack.")
 }
 
-func erasePage(c datalink.Transactor, address uint32) error {
+func erasePage(ctx *FlashCtx, address uint32) error {
 	req := ErasePkt{
 		Address: address,
 	}
@@ -344,7 +348,7 @@ func erasePage(c datalink.Transactor, address uint32) error {
 		return fmt.Errorf("Erase address must be 1 kB page-aligned.");
 	}
 
-	ret, err := c.Transact([]datalink.Packet{
+	ret, err := ctx.c.Transact([]datalink.Packet{
 		req.Packet(),
 	})
 	if err != nil {
@@ -362,12 +366,12 @@ func erasePage(c datalink.Transactor, address uint32) error {
 		}
 	}
 
-	err = waitForAck(c, 50 * time.Millisecond)
+	err = waitForAck(ctx, 50 * time.Millisecond)
 	if err != nil {
 		return err
 	}
 
-	dat, err := readData(c, address, 512)
+	dat, err := readData(ctx, address, 512)
 	if err != nil {
 		return err
 	}
@@ -380,12 +384,12 @@ func erasePage(c datalink.Transactor, address uint32) error {
 	return nil
 }
 
-func jumpTo(c datalink.Transactor, address uint32) error {
+func jumpTo(ctx *FlashCtx, address uint32) error {
 	req := GoPkt{
 		Address: address,
 	}
 
-	ret, err := c.Transact([]datalink.Packet{
+	ret, err := ctx.c.Transact([]datalink.Packet{
 		req.Packet(),
 	})
 	if err != nil {
@@ -406,7 +410,7 @@ func jumpTo(c datalink.Transactor, address uint32) error {
 	return nil
 }
 
-func writeData(c datalink.Transactor, address uint32, data []byte, verify bool) error {
+func writeData(ctx *FlashCtx, address uint32, data []byte, verify bool) error {
 	req := WritePkt{
 		Address: address,
 		Len: uint32(len(data)),
@@ -419,7 +423,7 @@ func writeData(c datalink.Transactor, address uint32, data []byte, verify bool) 
 	}
 	req.CRC = crc
 
-	ret, err := c.Transact([]datalink.Packet{
+	ret, err := ctx.c.Transact([]datalink.Packet{
 		req.Packet(),
 	})
 	if err != nil {
@@ -437,13 +441,13 @@ func writeData(c datalink.Transactor, address uint32, data []byte, verify bool) 
 		}
 	}
 
-	err = waitForAck(c, 50 * time.Millisecond)
+	err = waitForAck(ctx, 50 * time.Millisecond)
 	if err != nil {
 		return err
 	}
 
 	if verify {
-		dat, err := readData(c, address, uint32(len(data)))
+		dat, err := readData(ctx, address, uint32(len(data)))
 		if err != nil {
 			return err
 		}
@@ -455,12 +459,12 @@ func writeData(c datalink.Transactor, address uint32, data []byte, verify bool) 
 	return nil
 }
 
-func doQuery(c datalink.Transactor, parameter uint32) (uint32, error) {
+func doQuery(ctx *FlashCtx, parameter uint32) (uint32, error) {
 	req := QueryPkt{
 		Parameter: parameter,
 	}
 
-	_, err := c.Transact([]datalink.Packet{
+	_, err := ctx.c.Transact([]datalink.Packet{
 		req.Packet(),
 	})
 	if err != nil {
@@ -469,7 +473,7 @@ func doQuery(c datalink.Transactor, parameter uint32) (uint32, error) {
 
 	ntries := 8
 	for i := 0; i < ntries; i++ {
-		ret, err := c.Transact([]datalink.Packet{
+		ret, err := ctx.c.Transact([]datalink.Packet{
 			datalink.Packet{0, []byte{}},
 		})
 		if err != nil {
@@ -502,24 +506,50 @@ func doQuery(c datalink.Transactor, parameter uint32) (uint32, error) {
 	return 0, fmt.Errorf("Read timeout.")
 }
 
-
 func main() {
-
 	c, err := spiconn.NewSPIConn("/dev/spidev0.0")
 	if err != nil {
 		fmt.Println(err)
 		return
 	}
+	ctx := new(FlashCtx)
+	ctx.c = c
 
+	err = sync(ctx)
+	if err != nil {
+		fmt.Println("sync err:", err)
+	}
+
+	maxTransfer, err := doQuery(ctx, QueryParamMaxTransfer)
+	if err != nil {
+		fmt.Println("query err:", err)
+	}
+	fmt.Println("Max transfer size: ", maxTransfer)
+
+
+	/*
+	err = erasePage(ctx.c, 0x0800C000);
+	fmt.Println(err)
+
+	err = writeData(ctx.c, 0x0800C000, bytes.Repeat([]byte{1, 2, 3, 4}, 128), true);
+	fmt.Println(err)
+	*/
+
+
+	time.Sleep(1 * time.Second)
+	jumpTo(ctx, 0x0800C000)
+
+	return
 
 	t := time.NewTicker(500 * time.Millisecond)
 	for _ = range t.C {
 
-		start := time.Now()
-		resp, err := readData(c, 0x08002000, 512)
+		//start := time.Now()
+		/*
+		resp, err := readData(ctx.c, 0x0800C000, 512)
 		if err != nil {
 			fmt.Println(err)
-			err = sync(c)
+			err = sync(ctx.c)
 			if err != nil {
 				fmt.Println("sync err:", err)
 			}
@@ -527,5 +557,6 @@ func main() {
 			fmt.Printf("Read %d bytes.\n", resp.Len)
 			fmt.Println(time.Since(start))
 		}
+		*/
 	}
 }
