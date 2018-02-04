@@ -78,6 +78,21 @@ func STM32CRC32(crc, data uint32) uint32 {
 	return crc
 }
 
+func calcCRC(data []byte) (uint32, error) {
+	if len(data) % 4 != 0 {
+		return 0, fmt.Errorf("Data length must be multiple of 4")
+	}
+
+	word := binary.LittleEndian.Uint32(data[0:4])
+	crc := STM32CRC32(0xffffffff, word)
+	for i := 4; i < len(data); i += 4 {
+		word = binary.LittleEndian.Uint32(data[i:i + 4])
+		crc = STM32CRC32(crc, word)
+	}
+
+	return crc, nil
+}
+
 func (r *ReadRespPkt) UnmarshalBinary(data []byte) error {
 	buf := bytes.NewBuffer(data)
 	binary.Read(buf, binary.LittleEndian, &r.Address)
@@ -90,11 +105,9 @@ func (r *ReadRespPkt) UnmarshalBinary(data []byte) error {
 		return fmt.Errorf("Short data (%d) in read response.", n)
 	}
 
-	word := binary.LittleEndian.Uint32(r.Data[0:4])
-	crc := STM32CRC32(0xffffffff, word)
-	for i := uint32(4); i < r.Len; i += 4 {
-		word = binary.LittleEndian.Uint32(r.Data[i:i + 4])
-		crc = STM32CRC32(crc, word)
+	crc, err := calcCRC(r.Data)
+	if err != nil {
+		return err
 	}
 
 	if crc != r.CRC {
