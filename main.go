@@ -163,6 +163,24 @@ func (w *WritePkt) Packet() datalink.Packet {
 	return pkt
 }
 
+const GoEndpoint = 0x7
+type GoPkt struct {
+	Address uint32
+}
+
+func (g *GoPkt) Packet() datalink.Packet {
+	pkt := datalink.Packet{
+		Endpoint: GoEndpoint,
+	}
+
+	buf := new(bytes.Buffer)
+	binary.Write(buf, binary.LittleEndian, g.Address)
+
+	pkt.Data = buf.Bytes()
+
+	return pkt
+}
+
 func sync(c datalink.Transactor) error {
 	c.Transact([]datalink.Packet{
 		datalink.Packet{2, []byte{ 0, 0, 0, 0, 1, 2, 3, 4 }},
@@ -322,6 +340,32 @@ func erasePage(c datalink.Transactor, address uint32) error {
 	for _, x := range dat.Data {
 		if x != 0xff {
 			return fmt.Errorf("Erase unsuccessful.")
+		}
+	}
+
+	return nil
+}
+
+func jumpTo(c datalink.Transactor, address uint32) error {
+	req := GoPkt{
+		Address: address,
+	}
+
+	ret, err := c.Transact([]datalink.Packet{
+		req.Packet(),
+	})
+	if err != nil {
+		return err
+	}
+	for _, pkt := range ret {
+		switch pkt.Endpoint {
+		case ErrorEndpoint:
+			e := new(ErrorPkt)
+			err = e.UnmarshalBinary(pkt.Data)
+			if err != nil {
+				return err
+			}
+			return e
 		}
 	}
 
