@@ -221,6 +221,17 @@ func (r *QueryRespPkt) UnmarshalBinary(data []byte) error {
 	return nil
 }
 
+const ResetEndpoint = 0xfe
+type ResetPkt struct { }
+
+func (r *ResetPkt) Packet() datalink.Packet {
+	pkt := datalink.Packet{
+		Endpoint: ResetEndpoint,
+	}
+
+	return pkt
+}
+
 type FlashCtx struct {
 	c datalink.Transactor
 
@@ -382,6 +393,28 @@ func doWrite(ctx *FlashCtx) error {
 }
 
 func doReset(ctx *FlashCtx) error {
+	req := ResetPkt{ }
+
+	fmt.Fprintf(os.Stderr, "Resetting...\n")
+
+	ret, err := ctx.c.Transact([]datalink.Packet{
+		req.Packet(),
+	})
+	if err != nil {
+		return err
+	}
+	for _, pkt := range ret {
+		switch pkt.Endpoint {
+		case ErrorEndpoint:
+			e := new(ErrorPkt)
+			err = e.UnmarshalBinary(pkt.Data)
+			if err != nil {
+				return err
+			}
+			return e
+		}
+	}
+
 	return nil
 }
 
