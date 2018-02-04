@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"flag"
 	"io"
+	"io/ioutil"
 	"os"
 	"strings"
 	"strconv"
@@ -324,7 +325,59 @@ func doErase(ctx *FlashCtx) error {
 	return nil
 }
 
+func roundUp(length, to uint32) uint32 {
+	return (length + (to - 1)) & ^(length - 1);
+}
+
 func doWrite(ctx *FlashCtx) error {
+	data, err := ioutil.ReadAll(ctx.writeCfg.file)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+
+	if ctx.autoErase {
+		fmt.Fprintf(os.Stderr, "Auto-erasing...\n")
+		ctx.eraseCfg.address = ctx.writeCfg.address
+		ctx.eraseCfg.length = roundUp(uint32(len(data)), flashPageSize)
+		err = doErase(ctx)
+		if err != nil {
+			return err
+		}
+	}
+
+	length := uint32(len(data))
+	if length % 4 != 0 {
+		length = roundUp(uint32(len(data)), 4)
+		data = append(data, bytes.Repeat([]byte{0}, int(length) - len(data))...)
+	}
+	lastAddress := ctx.writeCfg.address + length
+
+	s := ""
+	if ctx.verify {
+		s = "(and verify) "
+	}
+	fmt.Fprintf(os.Stderr, "Write %s%d bytes to 0x%08x\n", s, length, ctx.writeCfg.address)
+
+	bar := pb.New(int(lastAddress - ctx.writeCfg.address))
+	bar.ManualUpdate = true
+	bar.Start()
+
+	idx := uint32(0)
+	for address := ctx.writeCfg.address; address < lastAddress; address, idx = address + ctx.maxTransfer, idx + ctx.maxTransfer {
+		chunk := min(lastAddress - address, ctx.maxTransfer)
+
+		err := writeData(ctx, address, data[idx:idx + chunk], ctx.verify)
+		if err != nil {
+			return err
+		}
+
+		bar.Add(int(chunk))
+		bar.Update()
+	}
+
+	bar.Finish()
+
 	return nil
 }
 
@@ -707,7 +760,6 @@ func (c *eraseCfg) UnmarshalText(text []byte) error {
 
 type writeCfg struct {
 	address uint32
-	length uint32
 	file io.Reader
 }
 
@@ -715,7 +767,7 @@ func (c *writeCfg) UnmarshalText(text []byte) error {
 	str := string(text)
 
 	parts := strings.Split(str, ":")
-	if len(parts) != 3 {
+	if len(parts) != 2 {
 		return fmt.Errorf("Write command must be of the form: address:length:file")
 	}
 
@@ -725,16 +777,10 @@ func (c *writeCfg) UnmarshalText(text []byte) error {
 	}
 	c.address = uint32(addr)
 
-	length, err := strconv.ParseUint(parts[1], 0, 32)
-	if err != nil {
-		return err
-	}
-	c.length = uint32(length)
-
-	if parts[2] == "-" {
+	if parts[1] == "-" {
 		c.file = os.Stdin
 	} else {
-		file, err := os.Open(parts[2])
+		file, err := os.Open(parts[1])
 		if err != nil {
 			return err
 		}
