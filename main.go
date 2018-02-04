@@ -251,7 +251,34 @@ func (ctx *FlashCtx) retry(op operation) error {
 	return fmt.Errorf("Too many failures.")
 }
 
+func min(a, b uint32) uint32 {
+	if a < b {
+		return a
+	}
+	return b
+}
+
 func doRead(ctx *FlashCtx) error {
+
+	length := ctx.readCfg.length
+	lastAddress := ctx.readCfg.address + length
+
+	buf := new(bytes.Buffer)
+
+	for address := ctx.readCfg.address; address < lastAddress; address += ctx.maxTransfer {
+		chunk := min(lastAddress - address, ctx.maxTransfer)
+		b, err := readData(ctx, address, chunk)
+		if err != nil {
+			return err
+		}
+		buf.Write(b.Data)
+	}
+
+	ctx.readCfg.file.Write(buf.Bytes())
+	if f, ok := ctx.readCfg.file.(*os.File); ok {
+		f.Close()
+	}
+
 	return nil
 }
 
