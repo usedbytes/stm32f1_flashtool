@@ -293,7 +293,34 @@ func doRead(ctx *FlashCtx) error {
 	return nil
 }
 
+const flashPageSize = 1024
 func doErase(ctx *FlashCtx) error {
+	length := ctx.eraseCfg.length
+	lastAddress := ctx.eraseCfg.address + length
+
+	if length % flashPageSize != 0 {
+		fmt.Fprintf(os.Stderr, "Erase length must be multiple of page size (1024)\n")
+		os.Exit(1)
+	}
+
+	fmt.Fprintf(os.Stderr, "Erase %d bytes from 0x%08x\n", length, ctx.eraseCfg.address)
+
+	bar := pb.New(int(lastAddress - ctx.eraseCfg.address))
+	bar.ManualUpdate = true
+	bar.Start()
+
+	for address := ctx.eraseCfg.address; address < lastAddress; address += flashPageSize {
+		err := erasePage(ctx, address)
+		if err != nil {
+			return err
+		}
+
+		bar.Add(flashPageSize)
+		bar.Update()
+	}
+
+	bar.Finish()
+
 	return nil
 }
 
