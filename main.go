@@ -902,7 +902,7 @@ func main() {
 
 	maxTransfer, err := doQuery(ctx, QueryParamMaxTransfer)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
+		fmt.Fprintln(os.Stderr, "Get maxTransfer failed: ", err)
 		os.Exit(1)
 	}
 	fmt.Fprintln(os.Stderr, "Max transfer size: ", maxTransfer)
