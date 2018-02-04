@@ -135,8 +135,32 @@ func (e *ErasePkt) Packet() datalink.Packet {
 	return pkt
 }
 
+const WriteEndpoint = 0x4
+type WritePkt struct {
+	Address uint32
+	Len uint32
+	CRC uint32
+	Data []byte
+}
+
 func IsCRCError(e error) bool {
 	return strings.Contains(e.Error(), "CRC")
+}
+
+func (w *WritePkt) Packet() datalink.Packet {
+	pkt := datalink.Packet{
+		Endpoint: WriteEndpoint,
+	}
+
+	buf := new(bytes.Buffer)
+	binary.Write(buf, binary.LittleEndian, w.Address)
+	binary.Write(buf, binary.LittleEndian, w.Len)
+	binary.Write(buf, binary.LittleEndian, w.CRC)
+	buf.Write(w.Data)
+
+	pkt.Data = buf.Bytes()
+
+	return pkt
 }
 
 func sync(c datalink.Transactor) error {
@@ -280,6 +304,44 @@ func erasePage(c datalink.Transactor, address uint32) error {
 	for _, x := range dat.Data {
 		if x != 0xff {
 			return fmt.Errorf("Erase unsuccessful.")
+		}
+	}
+
+	return nil
+}
+
+func writeData(c datalink.Transactor, address uint32, data []byte, verify bool) error {
+	req := WritePkt{
+		Address: address,
+		Len: uint32(len(data)),
+		Data: data,
+	}
+
+	crc, err := calcCRC(data)
+	if err != nil {
+		return err
+	}
+	req.CRC = crc
+
+	_, err = c.Transact([]datalink.Packet{
+		req.Packet(),
+	})
+	if err != nil {
+		return err
+	}
+
+	err = waitForAck(c, 50 * time.Millisecond)
+	if err != nil {
+		return err
+	}
+
+	if verify {
+		dat, err := readData(c, address, uint32(len(data)))
+		if err != nil {
+			return err
+		}
+		if !bytes.Equal(dat.Data, data) {
+			return fmt.Errorf("Verify failed.")
 		}
 	}
 
