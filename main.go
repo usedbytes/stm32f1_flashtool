@@ -349,7 +349,6 @@ func doWrite(ctx *FlashCtx) error {
 	}
 
 	if ctx.autoErase {
-		fmt.Fprintf(os.Stderr, "Auto-erasing...\n")
 		ctx.eraseCfg.address = ctx.writeCfg.address
 		ctx.eraseCfg.length = roundUp(uint32(len(data)), flashPageSize)
 		err = doErase(ctx)
