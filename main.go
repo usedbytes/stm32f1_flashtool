@@ -338,7 +338,7 @@ func doErase(ctx *FlashCtx) error {
 }
 
 func roundUp(length, to uint32) uint32 {
-	return (length + (to - 1)) & ^(length - 1);
+	return (length + (to - 1)) & ^(to - 1);
 }
 
 func doWrite(ctx *FlashCtx) error {
