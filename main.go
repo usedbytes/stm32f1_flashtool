@@ -249,6 +249,8 @@ type FlashCtx struct {
 	reset bool
 	jump bool
 	jumpCfg jumpCfg
+
+	data []byte
 }
 type operation func(ctx *FlashCtx) error
 
@@ -298,10 +300,7 @@ func doRead(ctx *FlashCtx) error {
 
 	bar.Finish()
 
-	ctx.readCfg.file.Write(buf.Bytes())
-	if f, ok := ctx.readCfg.file.(*os.File); ok {
-		f.Close()
-	}
+	ctx.data = buf.Bytes()
 
 	return nil
 }
@@ -342,25 +341,19 @@ func roundUp(length, to uint32) uint32 {
 }
 
 func doWrite(ctx *FlashCtx) error {
-	data, err := ioutil.ReadAll(ctx.writeCfg.file)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
-
 	if ctx.autoErase {
 		ctx.eraseCfg.address = ctx.writeCfg.address
-		ctx.eraseCfg.length = roundUp(uint32(len(data)), flashPageSize)
-		err = doErase(ctx)
+		ctx.eraseCfg.length = roundUp(uint32(len(ctx.data)), flashPageSize)
+		err := doErase(ctx)
 		if err != nil {
 			return err
 		}
 	}
 
-	length := uint32(len(data))
+	length := uint32(len(ctx.data))
 	if length % 4 != 0 {
-		length = roundUp(uint32(len(data)), 4)
-		data = append(data, bytes.Repeat([]byte{0}, int(length) - len(data))...)
+		length = roundUp(uint32(len(ctx.data)), 4)
+		ctx.data = append(ctx.data, bytes.Repeat([]byte{0}, int(length) - len(ctx.data))...)
 	}
 	lastAddress := ctx.writeCfg.address + length
 
@@ -378,7 +371,7 @@ func doWrite(ctx *FlashCtx) error {
 	for address := ctx.writeCfg.address; address < lastAddress; address, idx = address + ctx.maxTransfer, idx + ctx.maxTransfer {
 		chunk := min(lastAddress - address, ctx.maxTransfer)
 
-		err := writeData(ctx, address, data[idx:idx + chunk], ctx.verify)
+		err := writeData(ctx, address, ctx.data[idx:idx + chunk], ctx.verify)
 		if err != nil {
 			return err
 		}
@@ -965,6 +958,11 @@ func main() {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
+
+		ctx.readCfg.file.Write(ctx.data)
+		if f, ok := ctx.readCfg.file.(*os.File); ok {
+			f.Close()
+		}
 	}
 
 	// 2. Erase
@@ -978,6 +976,12 @@ func main() {
 
 	// 3. Write
 	if ctx.write {
+		ctx.data, err = ioutil.ReadAll(ctx.writeCfg.file)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+
 		err = ctx.retry(doWrite)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
