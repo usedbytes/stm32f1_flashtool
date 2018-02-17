@@ -236,6 +236,7 @@ func (r *ResetPkt) Packet() datalink.Packet {
 type FlashCtx struct {
 	c datalink.Transactor
 
+	preReset bool
 	maxTransfer uint32
 	read bool
 	readCfg readCfg
@@ -706,6 +707,7 @@ func doQuery(ctx *FlashCtx, parameter uint32) (uint32, error) {
 }
 
 type CmdLine struct {
+	preReset bool
 	dev string
 	baud uint
 	readStr string
@@ -856,6 +858,7 @@ func init() {
 	// -g address
 	//     Jump to address
 
+	flag.BoolVar(&cmdLine.preReset, "p", false, "Send reset (and don't check) before anything else.")
 	flag.StringVar(&cmdLine.dev, "d", "/dev/spidev0.0", "The SPI device to use.")
 	flag.UintVar(&cmdLine.baud, "b", 1000000, "The SPI clock speed.")
 	flag.StringVar(&cmdLine.readStr, "r", "", "address:length:file - Read length bytes from address into file.")
@@ -870,6 +873,8 @@ func init() {
 
 func parseCmdline(ctx *FlashCtx) error {
 	flag.Parse()
+
+	ctx.preReset = cmdLine.preReset
 
 	c, err := spiconn.NewSPIConn(cmdLine.dev)
 	if err != nil {
@@ -927,6 +932,11 @@ func main() {
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
+	}
+
+	if ctx.preReset {
+		doReset(ctx)
+		time.Sleep(100 * time.Millisecond)
 	}
 
 	maxTransfer, err := doQuery(ctx, QueryParamMaxTransfer)
