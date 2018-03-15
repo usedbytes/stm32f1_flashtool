@@ -312,7 +312,7 @@ func doErase(ctx *FlashCtx) error {
 	lastAddress := ctx.eraseCfg.address + length
 
 	if length % flashPageSize != 0 {
-		fmt.Fprintf(os.Stderr, "Erase length must be multiple of page size (1024)\n")
+		fmt.Fprintf(os.Stderr, "Erase length must be multiple of page size (%d)\n", flashPageSize)
 		os.Exit(1)
 	}
 
@@ -552,7 +552,7 @@ func erasePage(ctx *FlashCtx, address uint32) error {
 		Address: address,
 	}
 
-	if (address & uint32(1024 - 1)) != 0 {
+	if (address & uint32(flashPageSize - 1)) != 0 {
 		return fmt.Errorf("Erase address must be 1 kB page-aligned.");
 	}
 
