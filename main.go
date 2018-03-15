@@ -392,6 +392,14 @@ func doReset(ctx *FlashCtx) error {
 	fmt.Fprintf(os.Stderr, "Resetting...\n")
 
 	ret, err := ctx.c.Transact([]datalink.Packet{
+		/*
+		 * Send some empty packets first, to make sure there's a free
+		 * packet to receive the reset request.
+		 */
+		datalink.Packet{0, []byte{}},
+		datalink.Packet{0, []byte{}},
+		datalink.Packet{0, []byte{}},
+		datalink.Packet{0, []byte{}},
 		req.Packet(),
 	})
 	if err != nil {
