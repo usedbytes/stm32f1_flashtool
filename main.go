@@ -432,7 +432,7 @@ func sync(ctx *FlashCtx) error {
 		datalink.Packet{2, []byte{ 0, 0, 0, 0, 1, 2, 3, 4 }},
 	})
 
-	for i := 0; i < 64; i++ {
+	for i := 0; i < 128; i++ {
 		ret, _ := ctx.c.Transact([]datalink.Packet{
 			datalink.Packet{0, []byte{}},
 			datalink.Packet{0, []byte{}},
